@@ -1,0 +1,46 @@
+modules {
+    module {
+        name = "monitor_op"
+        language = "python"
+    }
+}
+
+collection_group {
+    collect_every = 60
+    metric {
+        name_match = "oplatency_journal_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_opw_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_opr_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_avgoplat_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "iops_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_apply_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_commitcycle_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "queue_transaction_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "oplatency_subopw_osd_([0-9]+)"
+        value_threshold = 0
+    }
+}
