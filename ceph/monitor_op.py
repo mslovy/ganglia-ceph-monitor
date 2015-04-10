@@ -120,9 +120,11 @@ def get_oplatency_avgoplat(name):
             return 0
         result = result_asok[id]
         if "osd" in result:
-            if "op_latency" in result["osd"]:
-                sum_end = result["osd"]["op_latency"]["sum"]
-                ops_end = result["osd"]["op_latency"]["avgcount"]
+            if "op_latency" in result["osd"] and "subop_latency" in result["osd"]:
+                op_sum_end = result["osd"]["op_latency"]["sum"]
+                op_ops_end = result["osd"]["op_latency"]["avgcount"]
+                subop_sum_end = result["osd"]["subop_latency"]["sum"]
+                subop_ops_end = result["osd"]["subop_latency"]["avgcount"]
                 context = []
                 if os.path.exists('/dev/shm/op_latency'+id):
                     output = open('/dev/shm/op_latency'+id,'r')
@@ -134,6 +136,8 @@ def get_oplatency_avgoplat(name):
                     output.close()
                 output = open('/dev/shm/op_latency'+id,'w')
                 #cal 
+                sum_end = float(op_sum_end) + float(subop_sum_end)
+                ops_end = int(op_ops_end) + int(subop_ops_end)
                 output.write(str(sum_end))
                 output.write('\n')
                 output.write(str(ops_end))
@@ -168,9 +172,11 @@ def get_oplatency_opw(name):
         result = result_asok[id]
 
         if "osd" in result:
-            if "op_w_latency" in result["osd"]:
-                sum_end = result["osd"]["op_w_latency"]["sum"]
-                ops_end = result["osd"]["op_w_latency"]["avgcount"]
+            if "op_w_latency" in result["osd"] and "subop_latency" in result["osd"]:
+                op_sum_end = result["osd"]["op_w_latency"]["sum"]
+                op_ops_end = result["osd"]["op_w_latency"]["avgcount"]
+                subop_sum_end = result["osd"]["subop_latency"]["sum"]
+                subop_ops_end = result["osd"]["subop_latency"]["avgcount"]
                 context = []
                 if os.path.exists('/dev/shm/op_w_latency'+id):
                     output = open('/dev/shm/op_w_latency'+id,'r')
@@ -182,6 +188,8 @@ def get_oplatency_opw(name):
                     output.close()
                 output = open('/dev/shm/op_w_latency'+id,'w')
                 #cal 
+                sum_end = float(op_sum_end) + float(subop_sum_end)
+                ops_end = int(op_ops_end) + int(subop_ops_end)
                 output.write(str(sum_end))
                 output.write('\n')
                 output.write(str(ops_end))
@@ -264,8 +272,10 @@ def get_iops(name):
             return 0
         result = result_asok[id]
         if "osd" in result:
-            if "op_latency" in result["osd"]:
-                ops_end = result["osd"]["op_latency"]["avgcount"]
+            if "op_w" in result["osd"] and "subop" in result["osd"]:
+                ops_w_end = result["osd"]["op_w"]
+                ops_subop_end = result["osd"]["subop"]
+                
                 context = []
                 if os.path.exists('/dev/shm/iops'+id):
                     output = open('/dev/shm/iops'+id,'r')
@@ -277,6 +287,12 @@ def get_iops(name):
                     output.close()
                 output = open('/dev/shm/iops'+id,'w')
                 #cal 
+                ops_end = 0
+                if "op_r" in result["osd"]:
+                    ops_r_end = result["osd"]["op_r"]
+                    ops_end = int(ops_w_end) + int(ops_subop_end) + int(ops_r_end)
+                else:
+                    ops_end = int(ops_w_end) + int(ops_subop_end)
                 output.write(str(ops_end))
                 output.write('\n')
                 output.close()
@@ -490,20 +506,107 @@ def get_oplatency_subopw(name):
         output.close()
         return 0
 
+def get_bytesinct(name):
+    id = name.split('_')[-1]
+    try:
+        if id not in result_asok:
+            return 0
+        result = result_asok[id]
+
+        if "osd" in result:
+            if "op_w_in_bytes" in result["osd"] and "subop_in_bytes" in result["osd"]:
+                op_w_bytes = result["osd"]["op_w_in_bytes"]
+                subop_bytes = result["osd"]["subop_in_bytes"]
+                context = []
+                if os.path.exists('/dev/shm/bytesinct'+id):
+                    output = open('/dev/shm/bytesinct'+id,'r')
+                    while True:
+                        line = output.readline()
+                        if not line:
+                            break
+                        context.append(line)
+                    output.close()
+                output = open('/dev/shm/bytesinct'+id,'w')
+                #cal 
+                bytes_end = int(op_w_bytes) + int(subop_bytes)
+                output.write(str(bytes_end))
+                output.write('\n') 
+                output.close()
+                if len(context) != 1:
+                    return 0
+                bytes = context[0].strip('\n')
+                if int(bytes_end) == int(bytes):
+                    return 0
+                else:
+                    r = int(bytes_end) - int(bytes)
+                    return r
+            else:
+                return 0
+        else:
+            return 0
+    except:
+        output = open('/var/log/bytesinct'+id, 'w')
+        output.write("exception when do : %s" %(traceback.format_exc()))
+        output.close()
+        return 0
+
+def get_bytesoutct(name):
+    id = name.split('_')[-1]
+    try:
+        if id not in result_asok:
+            return 0
+        result = result_asok[id]
+
+        if "osd" in result:
+            if "op_r_out_bytes" in result["osd"]:
+                bytes_end = result["osd"]["op_r_out_bytes"]
+                context = []
+                if os.path.exists('/dev/shm/bytesoutct'+id):
+                    output = open('/dev/shm/bytesoutct'+id,'r')
+                    while True:
+                        line = output.readline()
+                        if not line:
+                            break
+                        context.append(line)
+                    output.close()
+                output = open('/dev/shm/bytesoutct'+id,'w')
+                #cal 
+                output.write(str(bytes_end))
+                output.write('\n') 
+                output.close()
+                if len(context) != 1:
+                    return 0
+                bytes = context[0].strip('\n')
+                if int(bytes_end) == int(bytes):
+                    return 0
+                else:
+                    r = int(bytes_end) - int(bytes)
+                    return r
+            else:
+                return 0
+        else:
+            return 0
+    except:
+        output = open('/var/log/bytesoutct'+id, 'w')
+        output.write("exception when do : %s" %(traceback.format_exc()))
+        output.close()
+        return 0
+
+
 
 def metric_init(params):
     global descriptors
     osd_list = get_local_osds()
     global result_asok
-    funs = {0:get_oplatency_journal,1:get_oplatency_opw,2:get_oplatency_opr,3:get_iops,4:get_oplatency_apply,5:get_oplatency_commitcycle,6:get_queue_transaction,7:get_oplatency_subopw,8:get_oplatency_avgoplat}
-    names = {0:"oplatency_journal_",1:"oplatency_opw_",2:"oplatency_opr_",3:"iops_",4:"oplatency_apply_",5:"oplatency_commitcycle_",6:"queue_transaction_",7:"oplatency_subopw_",8:"oplatency_avgoplat_"}
-    des = {0:"oplatency_journal",1:"oplatency_opw",2:"oplatency_opr",3:"iops",4:"oplatency_apply",5:"oplatency_commitcycle",6:"queue_transaction",7:"oplatency_subopw",8:"oplatency_avgoplat"}
-    values_type = {0:'float',1:'float',2:'float',3:'uint',4:'float',5:'float',6:'float',7:'float',8:'float'}
-    format_c = {0:'%f',1:'%f',2:'%f',3:'%u',4:'%f',5:'%f',6:'%f',7:'%f',8:'%f'}
+    funs = {0:get_oplatency_journal,1:get_oplatency_opw,2:get_oplatency_opr,3:get_iops,4:get_oplatency_apply,5:get_oplatency_commitcycle,6:get_queue_transaction,7:get_oplatency_subopw,8:get_oplatency_avgoplat,9:get_bytesinct,10:get_bytesoutct}
+    names = {0:"oplatency_journal_",1:"oplatency_opw_",2:"oplatency_opr_",3:"iops_",4:"oplatency_apply_",5:"oplatency_commitcycle_",6:"queue_transaction_",7:"oplatency_subopw_",8:"oplatency_avgoplat_",9:"bytesinct_",10:"bytesoutct_"}
+    des = {0:"oplatency_journal",1:"oplatency_opw",2:"oplatency_opr",3:"iops",4:"oplatency_apply",5:"oplatency_commitcycle",6:"queue_transaction",7:"oplatency_subopw",8:"oplatency_avgoplat",9:"bytesinct",10:"bytesoutct"}
+    values_type = {0:'float',1:'float',2:'float',3:'uint',4:'float',5:'float',6:'float',7:'float',8:'float',9:'uint',10:'uint'}
+    format_c = {0:'%f',1:'%f',2:'%f',3:'%u',4:'%f',5:'%f',6:'%f',7:'%f',8:'%f',9:'%u',10:'%u'}
     if osd_list is None:
         return []
     for id in osd_list:
-        for i in xrange(0,9):
+        for i in xrange(0,11):
             d1 = {
                 'name': names[i]+NAME_PREFIX + id,
                 'call_back': funs[i],
