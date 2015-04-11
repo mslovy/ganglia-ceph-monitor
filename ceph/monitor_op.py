@@ -9,6 +9,7 @@ import subprocess
 import traceback
 descriptors = list()
 local_path = "/var/run/ceph/"
+log_path = "/var/log/ceph-monitor"
 result_asok = {}
 result_ack ={}
 NAME_PREFIX = 'osd_'
@@ -595,33 +596,99 @@ def get_bytesoutct(name):
 
 
 def metric_init(params):
+	#sample asok here
     global descriptors
+	global result_asok
     osd_list = get_local_osds()
-    global result_asok
-    funs = {0:get_oplatency_journal,1:get_oplatency_opw,2:get_oplatency_opr,3:get_iops,4:get_oplatency_apply,5:get_oplatency_commitcycle,6:get_queue_transaction,7:get_oplatency_subopw,8:get_oplatency_avgoplat,9:get_bytesinct,10:get_bytesoutct}
-    names = {0:"oplatency_journal_",1:"oplatency_opw_",2:"oplatency_opr_",3:"iops_",4:"oplatency_apply_",5:"oplatency_commitcycle_",6:"queue_transaction_",7:"oplatency_subopw_",8:"oplatency_avgoplat_",9:"bytesinct_",10:"bytesoutct_"}
-    des = {0:"oplatency_journal",1:"oplatency_opw",2:"oplatency_opr",3:"iops",4:"oplatency_apply",5:"oplatency_commitcycle",6:"queue_transaction",7:"oplatency_subopw",8:"oplatency_avgoplat",9:"bytesinct",10:"bytesoutct"}
-    values_type = {0:'float',1:'float',2:'float',3:'uint',4:'float',5:'float',6:'float',7:'float',8:'float',9:'uint',10:'uint'}
-    format_c = {0:'%f',1:'%f',2:'%f',3:'%u',4:'%f',5:'%f',6:'%f',7:'%f',8:'%f',9:'%u',10:'%u'}
+    callback_funcs = {
+		0:get_oplatency_journal,
+		1:get_oplatency_opw,
+		2:get_oplatency_opr,
+		3:get_iops,
+		4:get_oplatency_apply,
+		5:get_oplatency_commitcycle,
+		6:get_queue_transaction,
+		7:get_oplatency_subopw,
+		8:get_oplatency_avgoplat,
+		9:get_bytesinct,
+		10:get_bytesoutct
+	}
+    keys = {
+		0:"oplatency_journal_",
+		1:"oplatency_opw_",
+		2:"oplatency_opr_",
+		3:"iops_",
+		4:"oplatency_apply_",
+		5:"oplatency_commitcycle_",
+		6:"queue_transaction_",
+		7:"oplatency_subopw_",
+		8:"oplatency_avgoplat_",
+		9:"bytesinct_",
+		10:"bytesoutct_"
+	}
+    descripts = {
+		#describe the details for each [key, value]
+		0:"oplatency_journal",
+		1:"oplatency_opw",
+		2:"oplatency_opr",
+		3:"iops",
+		4:"oplatency_apply",
+		5:"oplatency_commitcycle",
+		6:"queue_transaction",
+		7:"oplatency_subopw",
+		8:"oplatency_avgoplat",
+		9:"bytesinct",
+		10:"bytesoutct"
+	}
+    value_types = {
+		0:'float',
+		1:'float',
+		2:'float',
+		3:'uint',
+		4:'float',
+		5:'float',
+		6:'float',
+		7:'float',
+		8:'float',
+		9:'uint',
+		10:'uint'
+	}
+    formats = {
+		0:'%f',
+		1:'%f',
+		2:'%f',
+		3:'%u',
+		4:'%f',
+		5:'%f',
+		6:'%f',
+		7:'%f',
+		8:'%f',
+		9:'%u',
+		10:'%u'
+	}
     if osd_list is None:
+		#print log here, level: WARN
         return []
     for id in osd_list:
         for i in xrange(0,11):
-            d1 = {
-                'name': names[i]+NAME_PREFIX + id,
-                'call_back': funs[i],
+            d = {
+                'name': keys[i]+NAME_PREFIX + id,
+                'call_back': callback_funcs[i],
                 'time_max': 90,
-                'value_type': values_type[i],
+                'value_type': value_types[i],
                 'units': 'C',
                 'slope': 'both',
-                'format': format_c[i],
-                'description': des[i],
+                'format': formats[i],
+                'description': descripts[i],
                 'groups': 'OSD'
             }
-            descriptors.append(d1)
+            descriptors.append(d)
     return descriptors
 def metric_cleanup():
     pass
+
+def log_write():
+	pass
 
 #This code is for debugging and unit testing
 if __name__ == '__main__':
