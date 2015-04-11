@@ -43,4 +43,13 @@ collection_group {
         name_match = "oplatency_subopw_osd_([0-9]+)"
         value_threshold = 0
     }
+    metric {
+        name_match = "bytesinct_osd_([0-9]+)"
+        value_threshold = 0
+    }
+    metric {
+        name_match = "bytesoutct_osd_([0-9]+)"
+        value_threshold = 0
+    }
+
 }
