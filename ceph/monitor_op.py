@@ -1,19 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import random
 import time
 import os
 import re
 import json
 import subprocess
 import traceback
+import logging
 descriptors = list()
 local_path = "/var/run/ceph/"
 log_path = "/var/log/ceph-monitor"
 result_asok = {}
-result_ack ={}
+
 NAME_PREFIX = 'osd_'
 num = 0
+
+# log settings
+logging.basicConfig(filename = "/var/log/monitor_op.log", level = logging.CRITICAL , filemode = "a", format = "%(asctime)s - %(thread)d - %(levelname)s - %(filename)s[line:%(lineno)d]: %(message)s")
+log = logging.getLogger("root")
+
 def run_shell(cmd, timeout = 4):
     p = subprocess.Popen(
         args = cmd,
@@ -65,43 +70,64 @@ def get_local_osds():
             id = f.split('.')[-2]
             osd_list.append(id)
     return osd_list
+
+def get_last_val(filename):
+    context = []
+    if os.path.exists(filename):
+        output = open(filename,'r')
+        while True:
+            line = output.readline()
+            if not line:
+                break
+            context.append(line)
+        output.close()
+    return context
+
+def update_val(id):
+    global result_asok
+    global local_path
+    file_path = local_path + "ceph-osd."+id+".asok"
+    result_asok[id] = json.loads(run_shell('ceph --admin-daemon {asok} perf dump'.format(asok=file_path)))
+    return result_asok[id]
+def set_current_val(filename,vals):
+    
+    if type(vals) != list:
+        return -1
+    output = open(filename,'w')
+    for val in vals:
+        output.write(str(val))
+        output.write('\n')
+    output.close()
+    return 0
     
 def get_oplatency_journal(name):
-    id = name.split('_')[-1]
+    
     try:
-        global result_asok
-        file_path = local_path + "ceph-osd."+id+".asok"
-        result_asok[id] = json.loads(run_shell('ceph --admin-daemon {asok} perf dump'.format(asok=file_path)))
-        result = result_asok[id]
+        id = name.split('_')[-1]
+        result = update_val(id)
         if "filestore" in result:
             if "journal_latency" in result["filestore"]:
-                sum_end = result["filestore"]["journal_latency"]["sum"]
-                ops_end = result["filestore"]["journal_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/journal_latency'+id):
-                    output = open('/dev/shm/journal_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/journal_latency'+id,'w')
+                current_sum = result["filestore"]["journal_latency"]["sum"]
+                current_ops = result["filestore"]["journal_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/journal_latency'+id)
+                
                 #cal 
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2 :
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret = set_current_val('/dev/shm/journal_latency'+id)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2 :
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -109,50 +135,43 @@ def get_oplatency_journal(name):
         else:
             return 0
     except:
-        output = open('/var/log/journal_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
         
 def get_oplatency_avgoplat(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
         if "osd" in result:
             if "op_latency" in result["osd"] and "subop_latency" in result["osd"]:
-                op_sum_end = result["osd"]["op_latency"]["sum"]
-                op_ops_end = result["osd"]["op_latency"]["avgcount"]
-                subop_sum_end = result["osd"]["subop_latency"]["sum"]
-                subop_ops_end = result["osd"]["subop_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/op_latency'+id):
-                    output = open('/dev/shm/op_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/op_latency'+id,'w')
+                current_op_sum = result["osd"]["op_latency"]["sum"]
+                current_op_ops = result["osd"]["op_latency"]["avgcount"]
+                current_subop_sum = result["osd"]["subop_latency"]["sum"]
+                current_subop_ops = result["osd"]["subop_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/op_latency'+id)
+                
                 #cal 
-                sum_end = float(op_sum_end) + float(subop_sum_end)
-                ops_end = int(op_ops_end) + int(subop_ops_end)
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2:
+                current_sum = float(current_op_sum) + float(current_subop_sum)
+                current_ops = int(current_op_ops) + int(current_subop_ops)
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret = set_current_val('/dev/shm/op_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2:
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -160,51 +179,46 @@ def get_oplatency_avgoplat(name):
         else:
             return 0
     except:
-        output = open('/var/log/op_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_oplatency_opw(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
 
         if "osd" in result:
             if "op_w_latency" in result["osd"] and "subop_latency" in result["osd"]:
-                op_sum_end = result["osd"]["op_w_latency"]["sum"]
-                op_ops_end = result["osd"]["op_w_latency"]["avgcount"]
-                subop_sum_end = result["osd"]["subop_latency"]["sum"]
-                subop_ops_end = result["osd"]["subop_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/op_w_latency'+id):
-                    output = open('/dev/shm/op_w_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/op_w_latency'+id,'w')
+                current_op_sum = result["osd"]["op_w_latency"]["sum"]
+                current_op_ops = result["osd"]["op_w_latency"]["avgcount"]
+                current_subop_sum = result["osd"]["subop_latency"]["sum"]
+                current_subop_ops = result["osd"]["subop_latency"]["avgcount"]
+                last_context = []
+                last_context = []
+                last_context = get_last_val('/dev/shm/op_w_latency'+id)
+                
+                
                 #cal 
-                sum_end = float(op_sum_end) + float(subop_sum_end)
-                ops_end = int(op_ops_end) + int(subop_ops_end)
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2:
+                current_sum = float(current_op_sum) + float(current_subop_sum)
+                current_ops = int(current_op_ops) + int(current_subop_ops)
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret = set_current_val('/dev/shm/op_w_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2:
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -212,47 +226,39 @@ def get_oplatency_opw(name):
         else:
             return 0
     except:
-        output = open('/var/log/op_w_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_oplatency_opr(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
 
         if "osd" in result:
             if "op_r_latency" in result["osd"]:
-                sum_end = result["osd"]["op_r_latency"]["sum"]
-                ops_end = result["osd"]["op_r_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/op_r_latency'+id):
-                    output = open('/dev/shm/op_r_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/op_r_latency'+id,'w')
-                #cal 
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2:
+                current_sum = result["osd"]["op_r_latency"]["sum"]
+                current_ops = result["osd"]["op_r_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/op_r_latency'+id)
+                
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret = set_current_val('/dev/shm/op_r_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2:
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(last_sum) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -260,97 +266,80 @@ def get_oplatency_opr(name):
         else:
             return 0
     except:
-        output = open('/var/log/op_r_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_iops(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         global result_asok
         if id not in result_asok:
             return 0
         result = result_asok[id]
         if "osd" in result:
             if "op_w" in result["osd"] and "subop" in result["osd"]:
-                ops_w_end = result["osd"]["op_w"]
-                ops_subop_end = result["osd"]["subop"]
+                current_ops_w = result["osd"]["op_w"]
+                current_subop_w = result["osd"]["subop"]
+                last_context = []
                 
-                context = []
-                if os.path.exists('/dev/shm/iops'+id):
-                    output = open('/dev/shm/iops'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/iops'+id,'w')
+                last_context = get_last_val('/dev/shm/iops'+id)
                 #cal 
-                ops_end = 0
+                current_ops = 0
                 if "op_r" in result["osd"]:
-                    ops_r_end = result["osd"]["op_r"]
-                    ops_end = int(ops_w_end) + int(ops_subop_end) + int(ops_r_end)
+                    current_ops_r = result["osd"]["op_r"]
+                    current_ops = int(ops_w_end) + int(ops_subop_end) + int(ops_r_end)
                 else:
-                    ops_end = int(ops_w_end) + int(ops_subop_end)
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 1:
+                    current_ops = int(ops_w_end) + int(ops_subop_end)
+                current_context = []
+                current_context.append(str(current_ops))
+                ret = set_current_val('/dev/shm/iops'+id,current_context)
+                if len(last_context) != 1:
                     return 0
-                ops = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                last_ops = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    sum_ops = int(ops_end) - int(ops)
+                    sum_ops = int(current_ops) - int(last_ops)
                     return sum_ops 
             else:
                 return 0
         else:
             return 0
     except:
-        output = open('/var/log/iops'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_oplatency_apply(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         global result_asok
         if id not in result_asok:
             return 0
         result = result_asok[id]
         if "filestore" in result:
             if "apply_latency" in result["filestore"]:
-                sum_end = result["filestore"]["apply_latency"]["sum"]
-                ops_end = result["filestore"]["apply_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/apply_latency'+id):
-                    output = open('/dev/shm/apply_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/apply_latency'+id,'w')
-                #cal 
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2 :
+                current_sum = result["filestore"]["apply_latency"]["sum"]
+                current_ops = result["filestore"]["apply_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/apply_latency'+id)
+                
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret =set_current_val('/dev/shm/apply_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2 :
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(currrent_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -358,46 +347,38 @@ def get_oplatency_apply(name):
         else:
             return 0
     except:
-        output = open('/var/log/apply_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 def get_oplatency_commitcycle(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         global result_asok
         if id not in result_asok:
             return 0
         result = result_asok[id]
         if "filestore" in result:
             if "commitcycle_latency" in result["filestore"]:
-                sum_end = result["filestore"]["commitcycle_latency"]["sum"]
-                ops_end = result["filestore"]["commitcycle_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/commitcycle_latency'+id):
-                    output = open('/dev/shm/commitcycle_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/commitcycle_latency'+id,'w')
-                #cal 
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2 :
+                current_sum = result["filestore"]["commitcycle_latency"]["sum"]
+                current_ops = result["filestore"]["commitcycle_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/commitcycle_latency'+id)
+                
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret =set_current_val('/dev/shm/commitcycle_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2 :
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(currrent_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(current_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -405,47 +386,38 @@ def get_oplatency_commitcycle(name):
         else:
             return 0
     except:
-        output = open('/var/log/commitcycle_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_queue_transaction(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         global result_asok
         if id not in result_asok:
             return 0
         result = result_asok[id]
         if "filestore" in result:
             if "queue_transaction_latency_avg" in result["filestore"]:
-                sum_end = result["filestore"]["queue_transaction_latency_avg"]["sum"]
-                ops_end = result["filestore"]["queue_transaction_latency_avg"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/queue_transaction_latency_avg'+id):
-                    output = open('/dev/shm/queue_transaction_latency_avg'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/queue_transaction_latency_avg'+id,'w')
-                #cal 
-                output.write(str(sum_end))
-                output.write('\n')
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2 :
+                current_sum = result["filestore"]["queue_transaction_latency_avg"]["sum"]
+                current_ops = result["filestore"]["queue_transaction_latency_avg"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/queue_transaction_latency_avg'+id)
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret =set_current_val('/dev/shm/queue_transaction_latency_avg'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2 :
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
                     return lat 
             else:
@@ -453,47 +425,38 @@ def get_queue_transaction(name):
         else:
             return 0
     except:
-        output = open('/var/log/queue_transaction_latency_avg'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_oplatency_subopw(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
 
         if "osd" in result:
             if "subop_w_latency" in result["osd"]:
-                sum_end = result["osd"]["subop_w_latency"]["sum"]
-                ops_end = result["osd"]["subop_w_latency"]["avgcount"]
-                context = []
-                if os.path.exists('/dev/shm/subop_w_latency'+id):
-                    output = open('/dev/shm/subop_w_latency'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/subop_w_latency'+id,'w')
-                #cal 
-                output.write(str(sum_end))
-                output.write('\n') 
-                output.write(str(ops_end))
-                output.write('\n')
-                output.close()
-                if len(context) != 2:
+                current_sum = result["osd"]["subop_w_latency"]["sum"]
+                current_ops = result["osd"]["subop_w_latency"]["avgcount"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/subop_w_latency'+id)
+                current_context = []
+                current_context.append(current_sum)
+                current_context.append(current_ops)
+                ret = set_current_val('/dev/shm/subop_w_latency'+id,current_context)
+                if ret != 0:
                     return 0
-                ops = context[1].strip('\n')
-                sum = context[0].strip('\n')
-                if int(ops_end) == int(ops):
+                if len(last_context) != 2:
+                    return 0
+                last_ops = last_context[1].strip('\n')
+                last_sum = last_context[0].strip('\n')
+                if int(current_ops) == int(last_ops):
                     return 0
                 else:
-                    lat_sum = float(sum_end) - float(sum)
-                    lat_ops = int(ops_end) - int(ops)
+                    lat_sum = float(current_sum) - float(last_sum)
+                    lat_ops = int(current_ops) - int(last_ops)
                     lat = (lat_sum * 1.0)/lat_ops
 
                     return lat 
@@ -502,172 +465,157 @@ def get_oplatency_subopw(name):
         else:
             return 0
     except:
-        output = open('/var/log/subop_w_latency'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_bytesinct(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
 
         if "osd" in result:
             if "op_w_in_bytes" in result["osd"] and "subop_in_bytes" in result["osd"]:
-                op_w_bytes = result["osd"]["op_w_in_bytes"]
-                subop_bytes = result["osd"]["subop_in_bytes"]
-                context = []
-                if os.path.exists('/dev/shm/bytesinct'+id):
-                    output = open('/dev/shm/bytesinct'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/bytesinct'+id,'w')
+                current_op_w_bytes = result["osd"]["op_w_in_bytes"]
+                current_subop_bytes = result["osd"]["subop_in_bytes"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/bytesinct'+id)
+                
                 #cal 
-                bytes_end = int(op_w_bytes) + int(subop_bytes)
-                output.write(str(bytes_end))
-                output.write('\n') 
-                output.close()
-                if len(context) != 1:
+                current_bytes = int(current_op_w_bytes) + int(current_subop_bytes)
+                current_context = []
+                current_context.append(current_bytes)
+                ret = set_current_val('/dev/shm/bytesinct'+id,current_context)
+                if ret!= 0:
                     return 0
-                bytes = context[0].strip('\n')
-                if int(bytes_end) == int(bytes):
+                if len(last_context) != 1:
+                    return 0
+                last_bytes = last_context[0].strip('\n')
+                if int(current_bytes) == int(last_bytes):
                     return 0
                 else:
-                    r = int(bytes_end) - int(bytes)
+                    r = int(current_bytes) - int(last_bytes)
                     return r
             else:
                 return 0
         else:
             return 0
     except:
-        output = open('/var/log/bytesinct'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 def get_bytesoutct(name):
-    id = name.split('_')[-1]
+    
     try:
+        id = name.split('_')[-1]
         if id not in result_asok:
             return 0
         result = result_asok[id]
 
         if "osd" in result:
             if "op_r_out_bytes" in result["osd"]:
-                bytes_end = result["osd"]["op_r_out_bytes"]
-                context = []
-                if os.path.exists('/dev/shm/bytesoutct'+id):
-                    output = open('/dev/shm/bytesoutct'+id,'r')
-                    while True:
-                        line = output.readline()
-                        if not line:
-                            break
-                        context.append(line)
-                    output.close()
-                output = open('/dev/shm/bytesoutct'+id,'w')
-                #cal 
-                output.write(str(bytes_end))
-                output.write('\n') 
-                output.close()
-                if len(context) != 1:
+                current_bytes = result["osd"]["op_r_out_bytes"]
+                last_context = []
+                last_context = get_last_val('/dev/shm/bytesoutct'+id)
+                
+                current_context = []
+                current_context.append(current_bytes)
+                ret = set_current_val('/dev/shm/bytesoutct'+id,current_context)
+                if ret != 0:
                     return 0
-                bytes = context[0].strip('\n')
-                if int(bytes_end) == int(bytes):
+                if len(last_context) != 1:
+                    return 0
+                last_bytes = last_context[0].strip('\n')
+                if int(current_bytes) == int(last_bytes):
                     return 0
                 else:
-                    r = int(bytes_end) - int(bytes)
+                    r = int(current_bytes) - int(last_bytes)
                     return r
             else:
                 return 0
         else:
             return 0
     except:
-        output = open('/var/log/bytesoutct'+id, 'w')
-        output.write("exception when do : %s" %(traceback.format_exc()))
-        output.close()
+        log.error("exception when do : %s" %(traceback.format_exc()))
         return 0
 
 
 
 def metric_init(params):
-	#sample asok here
+    #sample asok here
     global descriptors
-	global result_asok
+    global result_asok
     osd_list = get_local_osds()
     callback_funcs = {
-		0:get_oplatency_journal,
-		1:get_oplatency_opw,
-		2:get_oplatency_opr,
-		3:get_iops,
-		4:get_oplatency_apply,
-		5:get_oplatency_commitcycle,
-		6:get_queue_transaction,
-		7:get_oplatency_subopw,
-		8:get_oplatency_avgoplat,
-		9:get_bytesinct,
-		10:get_bytesoutct
-	}
+        0:get_oplatency_journal,
+        1:get_oplatency_opw,
+        2:get_oplatency_opr,
+        3:get_iops,
+        4:get_oplatency_apply,
+        5:get_oplatency_commitcycle,
+        6:get_queue_transaction,
+        7:get_oplatency_subopw,
+        8:get_oplatency_avgoplat,
+        9:get_bytesinct,
+        10:get_bytesoutct
+    }
     keys = {
-		0:"oplatency_journal_",
-		1:"oplatency_opw_",
-		2:"oplatency_opr_",
-		3:"iops_",
-		4:"oplatency_apply_",
-		5:"oplatency_commitcycle_",
-		6:"queue_transaction_",
-		7:"oplatency_subopw_",
-		8:"oplatency_avgoplat_",
-		9:"bytesinct_",
-		10:"bytesoutct_"
-	}
+        0:"oplatency_journal_",
+        1:"oplatency_opw_",
+        2:"oplatency_opr_",
+        3:"iops_",
+        4:"oplatency_apply_",
+        5:"oplatency_commitcycle_",
+        6:"queue_transaction_",
+        7:"oplatency_subopw_",
+        8:"oplatency_avgoplat_",
+        9:"bytesinct_",
+        10:"bytesoutct_"
+    }
     descripts = {
-		#describe the details for each [key, value]
-		0:"oplatency_journal",
-		1:"oplatency_opw",
-		2:"oplatency_opr",
-		3:"iops",
-		4:"oplatency_apply",
-		5:"oplatency_commitcycle",
-		6:"queue_transaction",
-		7:"oplatency_subopw",
-		8:"oplatency_avgoplat",
-		9:"bytesinct",
-		10:"bytesoutct"
-	}
+        #describe the details for each [key, value]
+        0:"oplatency_journal_osdX: Shows the time spent on filejournal submit_entry to queue_completions_thru(completion) ",
+        1:"oplatency_opw_osdX: Shows the time spent on receive op write(include subop ) message to op write(include subop write) commit ",
+        2:"oplatency_opr_osdX: Shows the time spent on receive op read message to op read complete",
+        3:"iops_osdX: Shows the num of op(include subop,or) per sample interval",
+        4:"oplatency_apply_osdX: Shows the time spent on recevice op write(include subop) messaget to filestore finish op(include op)",
+        5:"oplatency_commitcycle_osdX: Shows the time spent on FileStore really start sync_entry to  sync_entry commit",
+        6:"queue_transaction_osdX: Shows the time spent on wating on FileStoe op_queue_reserve_throttle",
+        7:"oplatency_subopw_osdX: Shows the time spent on subop message to subop write commit ",
+        8:"oplatency_avgoplat_osdX: Shows the time spent on op write(include subop,op read ) message to op write(include subop write) commit or read complete ",
+        9:"bytesinct_osdX: Shows bytes of osd write per sample interval",
+        10:"bytesoutct: Shows bytes of osd read per sample interval"
+    }
     value_types = {
-		0:'float',
-		1:'float',
-		2:'float',
-		3:'uint',
-		4:'float',
-		5:'float',
-		6:'float',
-		7:'float',
-		8:'float',
-		9:'uint',
-		10:'uint'
-	}
+        0:'float',
+        1:'float',
+        2:'float',
+        3:'uint',
+        4:'float',
+        5:'float',
+        6:'float',
+        7:'float',
+        8:'float',
+        9:'uint',
+        10:'uint'
+    }
     formats = {
-		0:'%f',
-		1:'%f',
-		2:'%f',
-		3:'%u',
-		4:'%f',
-		5:'%f',
-		6:'%f',
-		7:'%f',
-		8:'%f',
-		9:'%u',
-		10:'%u'
-	}
+        0:'%f',
+        1:'%f',
+        2:'%f',
+        3:'%u',
+        4:'%f',
+        5:'%f',
+        6:'%f',
+        7:'%f',
+        8:'%f',
+        9:'%u',
+        10:'%u'
+    }
     if osd_list is None:
-		#print log here, level: WARN
+        #print log here, level: WARN
         return []
     for id in osd_list:
         for i in xrange(0,11):
@@ -687,8 +635,6 @@ def metric_init(params):
 def metric_cleanup():
     pass
 
-def log_write():
-	pass
 
 #This code is for debugging and unit testing
 if __name__ == '__main__':
